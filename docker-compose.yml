@@ -1,0 +1,63 @@
+services:
+  app:
+    # Published image (built by CI on every release). Cities run
+    # `docker compose pull` to update; developers use `--build`.
+    image: ghcr.io/arellaeast/civic-connector:latest
+    build: .
+    labels:
+      - com.centurylinklabs.watchtower.scope=civic-connector
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: connector
+      POSTGRES_PASSWORD: connector
+      POSTGRES_DB: civic_connector
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U connector"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  cache:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Optional zero-touch updates: Watchtower checks the published app image
+  # once a day and restarts the container on new releases.
+  # Enable with: docker compose --profile auto-update up -d
+  # Your .env config and Postgres data are untouched by updates.
+  watchtower:
+    image: containrrr/watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --interval 86400 --cleanup --scope civic-connector
+    labels:
+      - com.centurylinklabs.watchtower.scope=civic-connector
+    profiles: ["auto-update"]
+
+volumes:
+  pgdata:

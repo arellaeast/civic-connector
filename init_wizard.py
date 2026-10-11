@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+"""Interactive first-run setup wizard for the Civic Connector.
+
+Walks you through the handful of settings a city needs:
+  1. Socrata open-data portal domain
+  2. 311 dataset (auto-discovered from the portal's catalog)
+  3. Optional GTFS-RT transit feed URL
+  4. Auth mode (generates an API key for you if you pick "apikey")
+
+Writes a ready-to-use .env file. Nothing is uploaded anywhere.
+
+Run:  python3 init_wizard.py
+"""
+
+from __future__ import annotations
+
+import json
+import secrets
+import sys
+import urllib.parse
+import urllib.request
+
+CATALOG_URL = "https://api.us.socrata.com/api/catalog/v1"
+HEADERS = {"User-Agent": "civic-connector-setup-wizard"}
+
+
+def ask(prompt: str, default: str | None = None) -> str:
+    suffix = f" [{default}]" if default else ""
+    try:
+        val = input(f"{prompt}{suffix}: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print("\nSetup cancelled.")
+        sys.exit(1)
+    return val or (default or "")
+
+
+def get_json(url: str) -> dict | None:
+    try:
+        req = urllib.request.Request(url, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return json.load(resp)
+    except Exception:
+        return None
+
+
+def find_311_datasets(domain: str) -> list[dict]:
+    """Search the Socrata discovery catalog for likely 311 datasets."""
+    params = urllib.parse.urlencode({"domains": domain, "q": "311", "limit": 10})
+    data = get_json(f"{CATALOG_URL}?{params}")
+    if not data:
+        return []
+    out = []
+    for r in data.get("results", []):
+        res = r.get("resource", {})
+        if res.get("type") != "dataset":
+            continue
+        out.append(
+            {
+                "id": res.get("id", ""),
+                "name": r.get("metadata", {}).get("name") or res.get("name", ""),
+            }
+        )
+    return out
+
+
+def guess_sr_column(domain: str, dataset_id: str) -> str | None:
+    """Fetch the dataset's columns and guess the service-request-number column."""
+    data = get_json(f"https://{domain}/api/views/{dataset_id}")
+    if not data:
+        return None
+    field_names = [c.get("fieldName", "") for c in data.get("columns", [])]
+    # Prefer exact-ish matches first, then anything with "number"/"id".
+    for cand in field_names:
+        low = cand.lower()
+        if low in ("srnumber", "sr_number", "servicerequestnumber", "requestnumber"):
+            return cand
+    for cand in field_names:
+        low = cand.lower()
+        if "sr" in low and "number" in low:
+            return cand
+    for cand in field_names:
+        if cand.lower() in ("request_id", "requestid", "id"):
+            return cand
+    return None
+
+
+def main() -> None:
+    print("=== Civic Connector setup ===\n")
+    print("This takes about two minutes. Everything stays on your machine.\n")
+
+    domain = ask("Socrata open-data portal domain", "data.baltimorecity.gov")
+
+    dataset_id = ""
+    sr_column = ""
+    print(f"\nSearching {domain} for 311 datasets...")
+    candidates = find_311_datasets(domain)
+    if candidates:
+        print("Found these candidates:")
+        for i, c in enumerate(candidates, 1):
+            print(f"  {i}. {c['name']}  ({c['id']})")
+        print("   0. Skip / I'll paste an ID myself")
+        choice = ask("Pick a number", "1")
+        if choice.isdigit() and 1 <= int(choice) <= len(candidates):
+            picked = candidates[int(choice) - 1]
+            dataset_id = picked["id"]
+            print(f"Using: {picked['name']}")
+            print("Checking its columns for the request-number field...")
+            guessed = guess_sr_column(domain, dataset_id)
+            if guessed:
+                sr_column = ask("Service-request number column", guessed)
+            else:
+                sr_column = ask(
+                    "Service-request number column (check the dataset's column list)",
+                    "srnumber",
+                )
+        elif choice != "0":
+            dataset_id = choice  # user pasted an ID
+            sr_column = ask("Service-request number column", "srnumber")
+    else:
+        print("Couldn't reach the catalog (or no 311 datasets found).")
+        dataset_id = ask("311 dataset ID (xxxx-xxxx, Enter to skip)")
+        if dataset_id:
+            sr_column = ask("Service-request number column", "srnumber")
+
+    gtfs_url = ask("\nGTFS-RT Trip Updates feed URL (Enter to skip)")
+
+    print("\nAuth mode:")
+    print("  1. API key (recommended for cities)")
+    print("  2. No auth (local testing only)")
+    print("  3. Supabase JWT (you run Supabase Auth)")
+    auth_choice = ask("Pick", "1")
+    api_keys = ""
+    jwks_url = ""
+    if auth_choice == "3":
+        jwks_url = ask("Supabase JWKS URL")
+        auth_mode = "supabase"
+    elif auth_choice == "2":
+        auth_mode = "disabled"
+    else:
+        auth_mode = "apikey"
+        api_keys = secrets.token_urlsafe(32)
+
+    lines = [
+        "# Generated by init_wizard.py — edit freely.",
+        "",
+        "MCP_HOST=0.0.0.0",
+        "MCP_PORT=8000",
+        "CITY_ADAPTER=baltimore",
+        "LOG_LEVEL=INFO",
+        "",
+        "REDIS_URL=redis://cache:6379/0",
+        "CACHE_TTL_SECONDS=300",
+        "",
+        "DATABASE_URL=postgresql://connector:connector@db:5432/civic_connector",
+        "",
+        f"SOCRATA_DOMAIN={domain}",
+        "SOCRATA_APP_TOKEN=",
+        "",
+        f"BALTIMORE_311_DATASET_ID={dataset_id}",
+        f"BALTIMORE_311_SR_COLUMN={sr_column or 'srnumber'}",
+        "",
+        f"MTA_GTFS_RT_URL={gtfs_url}",
+        "",
+        f"AUTH_MODE={auth_mode}",
+        f"API_KEYS={api_keys}",
+        f"SUPABASE_JWKS_URL={jwks_url}",
+        "",
+    ]
+    with open(".env", "w") as f:
+        f.write("\n".join(lines) + "\n")
+
+    print("\nWrote .env — you're configured.")
+    if api_keys:
+        print(f"\nYour API key (save this, it won't be shown again):\n  {api_keys}")
+        print("Clients pass it as:  Authorization: Bearer <key>")
+    print("\nNext:  docker compose pull && docker compose up -d")
+    print("Then:  http://localhost:8000/health")
+
+
+if __name__ == "__main__":
+    main()
