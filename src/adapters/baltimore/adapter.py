@@ -1,4 +1,10 @@
-"""Baltimore city adapter: wires city data sources into MCP tools."""
+"""Baltimore city adapter: wires city data sources into MCP tools.
+
+Open Baltimore (data.baltimorecity.gov) runs on ArcGIS Hub, so the open-data
+catalog and 311 tools use the ArcGIS client. The Socrata client
+(src/adapters/baltimore/open_data.py) stays in the codebase as the portable
+client for Socrata-powered cities — see docs/ADDING_A_CITY.md.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +13,7 @@ from typing import Any
 import httpx
 from mcp.server.fastmcp import FastMCP
 
-from src.adapters.baltimore.open_data import SocrataClient
+from src.adapters.baltimore.arcgis import ArcGISClient
 from src.adapters.baltimore.sanitation import SanitationAdapter
 from src.adapters.baltimore.services_311 import ThreeOneOneAdapter
 from src.adapters.baltimore.transit import TransitAdapter
@@ -24,16 +30,14 @@ class BaltimoreAdapter(CityAdapter):
 
     def __init__(self, settings: Settings, cache: Cache | None = None) -> None:
         self.settings = settings
-        self.socrata = SocrataClient(
-            domain=settings.socrata_domain,
-            app_token=settings.socrata_app_token,
+        self.arcgis = ArcGISClient(
+            hub_owner=settings.arcgis_hub_owner,
             cache=cache,
             cache_ttl=settings.cache_ttl_seconds,
         )
         self.three_one_one = ThreeOneOneAdapter(
-            socrata=self.socrata,
-            dataset_id=settings.baltimore_311_dataset_id,
-            sr_column=settings.baltimore_311_sr_column,
+            arcgis=self.arcgis,
+            service_url=settings.arcgis_311_service_url,
         )
         self.transit = TransitAdapter(feed_url=settings.mta_gtfs_rt_url)
         self.sanitation = SanitationAdapter()
@@ -50,14 +54,19 @@ class BaltimoreAdapter(CityAdapter):
             order: str | None = None,
             limit: int = 50,
         ) -> list[dict[str, Any]]:
-            """Query a Baltimore open-data dataset (Socrata SoQL).
+            """Query a Baltimore open-data dataset (ArcGIS Hub catalog).
 
-            dataset_id is the xxxx-xxxx ID from data.baltimorecity.gov. Use
-            `where` for filters, e.g. "zip='21217'". Use list_open_datasets
-            to discover dataset IDs.
+            dataset_id is the ArcGIS item ID from data.baltimorecity.gov
+            (use list_open_datasets to discover them). Use `where` for
+            filters, e.g. "CouncilDistrict='9'". Use `select` for a
+            comma-separated field list.
             """
-            return await self.socrata.query(
-                dataset_id, where=where, select=select, order=order, limit=limit
+            return await self.arcgis.query_dataset(
+                dataset_id,
+                where=where,
+                out_fields=select,
+                order=order,
+                limit=limit,
             )
 
         @mcp.tool()
@@ -65,8 +74,9 @@ class BaltimoreAdapter(CityAdapter):
         async def list_open_datasets(
             search: str | None = None, limit: int = 20
         ) -> list[dict[str, Any]]:
-            """Search Baltimore's open-data catalog. Returns id, name, description."""
-            return await self.socrata.list_datasets(search=search, limit=limit)
+            """Search Baltimore's open-data catalog (ArcGIS Hub). Returns id,
+            title, description, type, and URL for each dataset."""
+            return await self.arcgis.search_datasets(search=search, limit=limit)
 
         @mcp.tool()
         @with_usage_logging("get_311_requests")
@@ -77,8 +87,8 @@ class BaltimoreAdapter(CityAdapter):
         ) -> list[dict[str, Any]]:
             """List Baltimore 311 service requests.
 
-            status filters open/closed requests (e.g. status="open").
-            Requires BALTIMORE_311_DATASET_ID to be configured.
+            status filters requests: "open", "closed", or a status fragment.
+            service_code matches against the request type, e.g. "tree".
             """
             return await self.three_one_one.get_311_requests(
                 status=status, service_code=service_code, limit=limit
@@ -113,14 +123,18 @@ class BaltimoreAdapter(CityAdapter):
         results: dict[str, str] = {}
         try:
             async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(f"https://{self.settings.socrata_domain}")
-                results["socrata"] = "ok" if resp.status_code < 500 else f"http_{resp.status_code}"
+                if self.settings.arcgis_311_service_url:
+                    resp = await client.get(
+                        f"{self.settings.arcgis_311_service_url}?f=json"
+                    )
+                    results["arcgis_311"] = (
+                        "ok" if resp.status_code == 200 else f"http_{resp.status_code}"
+                    )
+                else:
+                    results["arcgis_311"] = "not_configured"
         except Exception as exc:  # noqa: BLE001 - health checks must not raise
-            results["socrata"] = f"error:{type(exc).__name__}"
+            results["arcgis_311"] = f"error:{type(exc).__name__}"
         results["mta_gtfs_rt"] = (
             "configured" if self.settings.mta_gtfs_rt_url else "not_configured"
-        )
-        results["311_dataset"] = (
-            "configured" if self.settings.baltimore_311_dataset_id else "not_configured"
         )
         return results

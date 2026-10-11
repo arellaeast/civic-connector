@@ -34,16 +34,16 @@ Health check: `GET /health` (unauthenticated) returns upstream statuses.
 ## Configuration
 
 All settings are environment variables; see `.env.example` for the full list
-with comments. The two values you must supply for a working deployment:
+with comments. Out of the box, the 311 tools work with no configuration
+(the default `ARCGIS_311_SERVICE_URL` points at Baltimore's current 311
+feed). The one value you must supply for a working deployment:
 
-- `BALTIMORE_311_DATASET_ID` — the xxxx-xxxx ID of the 311 Service Requests
-  dataset on Open Baltimore (https://data.baltimorecity.gov). Open the
-  dataset, click "API", copy the ID.
 - `MTA_GTFS_RT_URL` — MTA Maryland GTFS-RT Trip Updates feed URL, from MTA's
   developer resources.
 
-Without them, the 311 and transit tools raise a clear configuration error
-instead of returning invented data.
+Without it, the transit tool raises a clear configuration error instead of
+returning invented data. Use `init_wizard.py` to discover the 311 service
+and transit feed URLs for your city.
 
 ## Auth
 
@@ -58,18 +58,20 @@ instead of returning invented data.
 
 ## Adding a dataset or tool
 
-1. Find the dataset on Open Baltimore and note its ID and column names.
-2. If it's Socrata, no new code is needed: the generic `query_open_data`
-   tool already covers it. Document the dataset ID and useful `where`
-   clauses in the README or your own docs.
+1. Find the dataset on Open Baltimore (ArcGIS Hub) and note its item ID and
+   field names (`list_open_datasets` shows both).
+2. If it's a Feature Service, no new code is needed: the generic
+   `query_open_data` tool already covers it — pass the item ID and an
+   ArcGIS SQL `where` clause. Document the item ID and useful filters in
+   the README or your own docs.
 3. For a new source type, add an adapter module under
    `src/adapters/baltimore/`, wire it into `BaltimoreAdapter`, and register
    the tool in `register_tools()`.
 
 ## Monitoring
 
-- `GET /health` — app status plus upstream dependency checks (Socrata
-  reachability, which optional integrations are configured).
+- `GET /health` — app status plus upstream dependency checks (ArcGIS 311
+  service reachability, which optional integrations are configured).
 - Logs: `docker compose logs -f app`. Tool calls, cache behavior, and auth
   failures are logged; set `LOG_LEVEL=DEBUG` for more detail.
 - Usage: the `usage_logs` table in Postgres records tool name, caller,

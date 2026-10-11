@@ -36,7 +36,7 @@ assistant can call this server's tools to find out.
         |               |                  |
  +------v------+ +------v-------+ +--------v--------+
  | Open Balt.  | | MTA GTFS-RT  | | Baltimore 311   |
- | Socrata API | | trip updates | | Socrata dataset |
+ | ArcGIS Hub  | | trip updates | | Feature Service |
  +-------------+ +--------------+ +-----------------+
 ```
 
@@ -62,7 +62,7 @@ everything).
 **Option D — manual:**
 
 1. Copy the config: `cp .env.example .env`
-2. (Optional) Fill in `BALTIMORE_311_DATASET_ID`, `MTA_GTFS_RT_URL`, and
+2. (Optional) Fill in `MTA_GTFS_RT_URL`, `ARCGIS_311_SERVICE_URL`, and
    `AUTH_MODE` in `.env`. Every setting is documented in `.env.example`.
    The server runs with safe defaults until then.
 3. Start everything: `docker compose up -d`
@@ -85,8 +85,8 @@ daily updates with `docker compose --profile auto-update up -d`. See
 
 | Tool | What it does |
 |---|---|
-| `query_open_data` | SoQL queries against any Open Baltimore dataset |
-| `list_open_datasets` | Search the open-data catalog (find dataset IDs) |
+| `query_open_data` | SQL queries against any Open Baltimore dataset (ArcGIS Hub) |
+| `list_open_datasets` | Search the ArcGIS Hub catalog (find dataset item IDs) |
 | `get_311_requests` | List 311 service requests, filterable by status |
 | `get_311_request` | Look up one 311 request by service-request number |
 | `get_transit_arrivals` | Real-time MTA arrivals at a GTFS stop |
@@ -100,11 +100,14 @@ reporting and capacity planning.
 All settings are environment variables — see `.env.example`, where each one
 is documented. The important ones:
 
-- `BALTIMORE_311_DATASET_ID` — required for 311 tools; the xxxx-xxxx ID from
-  Open Baltimore's 311 dataset API docs.
+- `ARCGIS_311_SERVICE_URL` — the 311 Feature Service (has a working default
+  for Baltimore's current-year requests; point it at another year's service
+  if needed).
+- `ARCGIS_HUB_OWNER` — owner of the Hub catalog (default `baltimore_city`).
 - `MTA_GTFS_RT_URL` — required for transit; MTA's GTFS-RT Trip Updates feed.
 - `AUTH_MODE` — `disabled` (dev), `apikey`, or `supabase`.
-- `SOCRATA_APP_TOKEN` — optional; raises Socrata rate limits.
+- `SOCRATA_DOMAIN` / `SOCRATA_APP_TOKEN` — only needed for Socrata-powered
+  cities (see below).
 
 No dataset IDs, feed URLs, or API endpoints are invented anywhere in this
 repo: anything city-specific and unverified is env-configurable, with comments
@@ -112,8 +115,9 @@ saying where to find the real value.
 
 ## Other cities
 
-Baltimore is the reference implementation. The Socrata client and the GTFS-RT
-adapter are portable — most changes for a new city are config, not code. See
+Baltimore is the reference implementation, running on ArcGIS Hub. The ArcGIS
+client, the GTFS-RT adapter, and the (separate) Socrata client are all
+portable — most changes for a new city are config, not code. See
 [docs/ADDING_A_CITY.md](docs/ADDING_A_CITY.md).
 
 ## Operations

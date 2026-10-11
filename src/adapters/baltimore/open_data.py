@@ -1,7 +1,8 @@
 """Socrata open-data client — fully implemented.
 
-Used for Open Baltimore (data.baltimorecity.gov). Portable to any city whose
-open-data portal runs on Socrata: only the domain changes.
+Portable client for cities whose open-data portal runs on Socrata: only the
+domain changes (see docs/ADDING_A_CITY.md). NOTE: Baltimore itself runs on
+ArcGIS Hub — the Baltimore adapter uses src/adapters/baltimore/arcgis.py.
 
 Real API patterns used (no invented endpoints):
 - SODA dataset queries: GET https://{domain}/resource/{id}.json?$where=...

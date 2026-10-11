@@ -2,8 +2,8 @@
 """Interactive first-run setup wizard for the Civic Connector.
 
 Walks you through the handful of settings a city needs:
-  1. Socrata open-data portal domain
-  2. 311 dataset (auto-discovered from the portal's catalog)
+  1. Open-data platform (ArcGIS Hub or Socrata)
+  2. 311 feed (auto-discovered from the Hub catalog / Socrata catalog)
   3. Optional GTFS-RT transit feed URL
   4. Auth mode (generates an API key for you if you pick "apikey")
 
@@ -20,7 +20,8 @@ import sys
 import urllib.parse
 import urllib.request
 
-CATALOG_URL = "https://api.us.socrata.com/api/catalog/v1"
+SOCRATA_CATALOG_URL = "https://api.us.socrata.com/api/catalog/v1"
+ARCGIS_SEARCH_URL = "https://www.arcgis.com/sharing/rest/search"
 HEADERS = {"User-Agent": "civic-connector-setup-wizard"}
 
 
@@ -39,15 +40,37 @@ def get_json(url: str) -> dict | None:
         req = urllib.request.Request(url, headers=HEADERS)
         with urllib.request.urlopen(req, timeout=20) as resp:
             return json.load(resp)
-    except Exception:
+    except Exception:  # noqa: BLE001 - wizard must degrade to manual entry
         return None
 
 
-def find_311_datasets(domain: str) -> list[dict]:
+def find_arcgis_311_services(owner: str) -> list[dict]:
+    """Search the ArcGIS Hub catalog for 311 Feature Services by owner."""
+    params = urllib.parse.urlencode(
+        {"q": f"311 owner:{owner}", "f": "json", "num": 10}
+    )
+    data = get_json(f"{ARCGIS_SEARCH_URL}?{params}")
+    if not data:
+        return []
+    out = []
+    for item in data.get("results", []):
+        if item.get("type") != "Feature Service":
+            continue
+        out.append(
+            {
+                "id": item.get("id", ""),
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+            }
+        )
+    return out
+
+
+def find_socrata_311_datasets(domain: str) -> list[dict]:
     """Search the Socrata discovery catalog for likely 311 datasets."""
     params = urllib.parse.urlencode({"domains": domain, "q": "311", "limit": 10})
-    data = get_json(f"{CATALOG_URL}?{params}")
-    if not data:
+    data = get_json(f"{SOCRATA_CATALOG_URL}?{params}")
+    if not data or data.get("error"):
         return []
     out = []
     for r in data.get("results", []):
@@ -63,64 +86,47 @@ def find_311_datasets(domain: str) -> list[dict]:
     return out
 
 
-def guess_sr_column(domain: str, dataset_id: str) -> str | None:
-    """Fetch the dataset's columns and guess the service-request-number column."""
-    data = get_json(f"https://{domain}/api/views/{dataset_id}")
-    if not data:
-        return None
-    field_names = [c.get("fieldName", "") for c in data.get("columns", [])]
-    # Prefer exact-ish matches first, then anything with "number"/"id".
-    for cand in field_names:
-        low = cand.lower()
-        if low in ("srnumber", "sr_number", "servicerequestnumber", "requestnumber"):
-            return cand
-    for cand in field_names:
-        low = cand.lower()
-        if "sr" in low and "number" in low:
-            return cand
-    for cand in field_names:
-        if cand.lower() in ("request_id", "requestid", "id"):
-            return cand
-    return None
-
-
 def main() -> None:
     print("=== Civic Connector setup ===\n")
     print("This takes about two minutes. Everything stays on your machine.\n")
 
-    domain = ask("Socrata open-data portal domain", "data.baltimorecity.gov")
+    print("Open-data platform:")
+    print("  1. ArcGIS Hub (Baltimore and many other cities)")
+    print("  2. Socrata")
+    platform = ask("Pick", "1")
 
-    dataset_id = ""
-    sr_column = ""
-    print(f"\nSearching {domain} for 311 datasets...")
-    candidates = find_311_datasets(domain)
-    if candidates:
-        print("Found these candidates:")
-        for i, c in enumerate(candidates, 1):
-            print(f"  {i}. {c['name']}  ({c['id']})")
-        print("   0. Skip / I'll paste an ID myself")
-        choice = ask("Pick a number", "1")
-        if choice.isdigit() and 1 <= int(choice) <= len(candidates):
-            picked = candidates[int(choice) - 1]
-            dataset_id = picked["id"]
-            print(f"Using: {picked['name']}")
-            print("Checking its columns for the request-number field...")
-            guessed = guess_sr_column(domain, dataset_id)
-            if guessed:
-                sr_column = ask("Service-request number column", guessed)
-            else:
-                sr_column = ask(
-                    "Service-request number column (check the dataset's column list)",
-                    "srnumber",
-                )
-        elif choice != "0":
-            dataset_id = choice  # user pasted an ID
-            sr_column = ask("Service-request number column", "srnumber")
+    arcgis_owner = ""
+    arcgis_311_url = ""
+    socrata_domain = ""
+    if platform == "2":
+        socrata_domain = ask("Socrata open-data portal domain", "data.cityofnewyork.us")
+        print(f"\nSearching the Socrata catalog for 311 datasets on {socrata_domain}...")
+        candidates = find_socrata_311_datasets(socrata_domain)
+        if candidates:
+            print("Found these candidates (use the ID with the Socrata adapter):")
+            for i, c in enumerate(candidates, 1):
+                print(f"  {i}. {c['name']}  ({c['id']})")
+        else:
+            print("Couldn't reach the catalog (or no 311 datasets found).")
+            print("Find the 311 dataset on the portal and note its xxxx-xxxx ID.")
     else:
-        print("Couldn't reach the catalog (or no 311 datasets found).")
-        dataset_id = ask("311 dataset ID (xxxx-xxxx, Enter to skip)")
-        if dataset_id:
-            sr_column = ask("Service-request number column", "srnumber")
+        arcgis_owner = ask("ArcGIS Hub owner (the city's ArcGIS organization user)", "baltimore_city")
+        print(f"\nSearching the ArcGIS Hub catalog for 311 services by '{arcgis_owner}'...")
+        candidates = find_arcgis_311_services(arcgis_owner)
+        if candidates:
+            print("Found these candidates:")
+            for i, c in enumerate(candidates, 1):
+                print(f"  {i}. {c['title']}")
+            print("   0. Skip / I'll paste a service URL myself")
+            choice = ask("Pick a number", "1")
+            if choice.isdigit() and 1 <= int(choice) <= len(candidates):
+                arcgis_311_url = candidates[int(choice) - 1]["url"]
+                print(f"Using: {candidates[int(choice) - 1]['title']}")
+            elif choice != "0":
+                arcgis_311_url = choice  # user pasted a URL
+        else:
+            print("Couldn't reach the catalog (or no 311 services found).")
+            arcgis_311_url = ask("311 Feature Service URL (Enter to use the default)")
 
     gtfs_url = ask("\nGTFS-RT Trip Updates feed URL (Enter to skip)")
 
@@ -153,11 +159,11 @@ def main() -> None:
         "",
         "DATABASE_URL=postgresql://connector:connector@db:5432/civic_connector",
         "",
-        f"SOCRATA_DOMAIN={domain}",
-        "SOCRATA_APP_TOKEN=",
+        f"ARCGIS_HUB_OWNER={arcgis_owner or 'baltimore_city'}",
+        f"ARCGIS_311_SERVICE_URL={arcgis_311_url}",
         "",
-        f"BALTIMORE_311_DATASET_ID={dataset_id}",
-        f"BALTIMORE_311_SR_COLUMN={sr_column or 'srnumber'}",
+        f"SOCRATA_DOMAIN={socrata_domain}",
+        "SOCRATA_APP_TOKEN=",
         "",
         f"MTA_GTFS_RT_URL={gtfs_url}",
         "",

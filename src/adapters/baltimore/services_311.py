@@ -1,43 +1,57 @@
-"""Baltimore 311 adapter, built on the Socrata client.
+"""Baltimore 311 adapter, built on the ArcGIS client.
 
-The 311 service-request dataset ID is deliberately NOT hardcoded: set
-BALTIMORE_311_DATASET_ID. Find it by browsing Open Baltimore
-(https://data.baltimorecity.gov) for the "311 Service Requests" dataset —
-open the dataset, click "API", and copy the xxxx-xxxx ID from the API URL.
-While there, verify BALTIMORE_311_SR_COLUMN against the dataset's column
-names (dataset page -> "View Data").
+Open Baltimore (data.baltimorecity.gov) runs on ArcGIS Hub. The 311 service
+requests live in a Feature Service (default: the current year's
+"311 Customer Service Requests"). Set ARCGIS_311_SERVICE_URL to point at a
+different year's service if needed — find them via list_open_datasets or the
+Hub search at https://bmore-open-data-baltimore.hub.arcgis.com.
+
+Verified field names on the 311 service (do not invent others):
+  ServiceRequestNum, SRType, SRStatus, CreatedDate, CloseDate, StatusDate,
+  Agency, Address, Neighborhood, CouncilDistrict, Outcome
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from src.adapters.baltimore.open_data import ConfigurationError, SocrataClient
+from src.adapters.baltimore.arcgis import ArcGISClient
+from src.adapters.baltimore.open_data import ConfigurationError
 
 
 class ThreeOneOneAdapter:
-    """Query Baltimore 311 service requests via the Socrata dataset."""
+    """Query Baltimore 311 service requests via the ArcGIS Feature Service."""
 
-    def __init__(
-        self,
-        socrata: SocrataClient,
-        dataset_id: str | None,
-        sr_column: str = "srnumber",
-    ) -> None:
-        self.socrata = socrata
-        self.dataset_id = dataset_id
-        self.sr_column = sr_column
+    def __init__(self, arcgis: ArcGISClient, service_url: str | None) -> None:
+        self.arcgis = arcgis
+        self.service_url = service_url
 
-    def _require_dataset(self) -> str:
-        if not self.dataset_id:
+    def _require_service(self) -> str:
+        if not self.service_url:
             raise ConfigurationError(
-                "BALTIMORE_311_DATASET_ID is not set. Find the 311 Service Requests "
-                "dataset on Open Baltimore (https://data.baltimorecity.gov), open its "
-                "API documentation, and set BALTIMORE_311_DATASET_ID to the dataset's "
-                "ID (the xxxx-xxxx code). Also verify BALTIMORE_311_SR_COLUMN matches "
-                "the dataset's service-request-number column."
+                "ARCGIS_311_SERVICE_URL is not set. It should be the Feature "
+                "Service URL for Baltimore's 311 requests, e.g. "
+                "https://services1.arcgis.com/.../arcgis/rest/services/"
+                "311_Customer_Service_Requests_current/FeatureServer. "
+                "Use list_open_datasets to find it on the Hub catalog."
             )
-        return self.dataset_id
+        return self.service_url
+
+    @staticmethod
+    def _status_clause(status: str) -> str:
+        """Map a plain-English status to an ArcGIS SQL filter on SRStatus.
+
+        Observed SRStatus values include Open, New, Pending, Hold, Closed
+        (each with " (Duplicate)" variants). "open" matches everything not
+        closed; "closed" matches the Closed* variants.
+        """
+        s = status.strip().upper()
+        if s == "OPEN":
+            return "SRStatus NOT LIKE 'Closed%'"
+        if s == "CLOSED":
+            return "SRStatus LIKE 'Closed%'"
+        safe = s.replace("'", "''")
+        return f"UPPER(SRStatus) LIKE '%{safe}%'"
 
     async def get_311_requests(
         self,
@@ -47,23 +61,27 @@ class ThreeOneOneAdapter:
     ) -> list[dict[str, Any]]:
         """List 311 service requests, optionally filtered.
 
-        status: e.g. "open" or "closed" (matched case-insensitively against the
-        dataset's status column). service_code: the 311 service code, if known.
+        status: "open", "closed", or a status fragment (matched
+        case-insensitively against SRStatus). service_code: matched
+        case-insensitively against the SRType field, e.g. "tree".
         """
-        dataset_id = self._require_dataset()
+        service_url = self._require_service()
         clauses = []
         if status:
-            clauses.append(f"upper(status)='{status.upper()}'")
+            clauses.append(self._status_clause(status))
         if service_code:
-            clauses.append(f"service_code='{service_code}'")
+            safe = service_code.replace("'", "''")
+            clauses.append(f"UPPER(SRType) LIKE '%{safe.upper()}%'")
         where = " AND ".join(clauses) if clauses else None
-        return await self.socrata.query(dataset_id, where=where, limit=limit)
+        return await self.arcgis.query_feature_service(
+            service_url, where=where, order="CreatedDate DESC", limit=limit
+        )
 
     async def get_311_request(self, request_id: str) -> dict[str, Any] | None:
         """Look up a single 311 request by its service-request number."""
-        dataset_id = self._require_dataset()
-        safe_id = request_id.replace("'", "''")  # SoQL string escaping
-        rows = await self.socrata.query(
-            dataset_id, where=f"{self.sr_column}='{safe_id}'", limit=1
+        service_url = self._require_service()
+        safe_id = request_id.replace("'", "''")  # ArcGIS SQL string escaping
+        rows = await self.arcgis.query_feature_service(
+            service_url, where=f"ServiceRequestNum='{safe_id}'", limit=1
         )
         return rows[0] if rows else None

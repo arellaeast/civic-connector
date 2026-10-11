@@ -26,13 +26,16 @@ class Settings(BaseSettings):
     # Postgres usage logs
     database_url: str = "postgresql://connector:connector@db:5432/civic_connector"
 
-    # Baltimore open data (Socrata)
-    socrata_domain: str = "data.baltimorecity.gov"
-    socrata_app_token: str | None = None
+    # Baltimore open data + 311 (ArcGIS Hub — Open Baltimore runs on it)
+    arcgis_hub_owner: str = "baltimore_city"
+    arcgis_311_service_url: str | None = (
+        "https://services1.arcgis.com/UWYHeuuJISiGmgXx/arcgis/rest/services/"
+        "311_Customer_Service_Requests_current/FeatureServer"
+    )
 
-    # Baltimore 311 (Socrata dataset)
-    baltimore_311_dataset_id: str | None = None
-    baltimore_311_sr_column: str = "srnumber"
+    # Socrata (portable client for Socrata-powered cities; see docs/ADDING_A_CITY.md)
+    socrata_domain: str | None = None
+    socrata_app_token: str | None = None
 
     # MTA transit (GTFS-RT)
     mta_gtfs_rt_url: str | None = None
