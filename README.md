@@ -11,6 +11,23 @@ Instead of digging through portals, a resident can ask *"Is my 311 request
 fixed yet?"* or *"When's the next bus at my stop?"* — and any MCP-compatible
 assistant can call this server's tools to find out.
 
+## Test drive (5 minutes, nothing to install)
+
+Click **Open in GitHub Codespaces** above, then inside the codespace:
+
+```bash
+python3 init_wizard.py   # 2-minute walkthrough, auto-finds the 311 feed
+docker compose up -d
+```
+
+Open the forwarded port URL in your browser: you'll get the landing page,
+the tool list, and instructions for connecting an agent — running against
+Baltimore's real 311 data. Fork the repo first to save your own copy.
+
+This is for evaluation. A codespace shuts down when idle and isn't meant
+for 24/7 use — to run the live service for a city, install it properly
+below.
+
 ## Architecture
 
 ```
@@ -44,22 +61,19 @@ Everything runs in Docker Compose: the app, Postgres (usage logs), and Redis
 (upstream API cache). Upstream city APIs are the bottleneck, not this server —
 responses are cached aggressively.
 
-## Quickstart
+## Install (for real use)
 
-**Option A — one click (no install):** click **Open in GitHub Codespaces**
-above. It opens a ready-to-run environment in your browser.
-
-**Option B — guided setup (recommended for cities):**
+**Option A — guided setup (recommended for cities):**
 
 ```bash
-python3 init_wizard.py   # 2-minute walkthrough, auto-finds your 311 dataset
+python3 init_wizard.py   # 2-minute walkthrough, auto-finds your 311 feed
 docker compose pull && docker compose up -d
 ```
 
-**Option C — one command:** `./setup.sh` (runs the wizard, then starts
+**Option B — one command:** `./setup.sh` (runs the wizard, then starts
 everything).
 
-**Option D — manual:**
+**Option C — manual:**
 
 1. Copy the config: `cp .env.example .env`
 2. (Optional) Fill in `MTA_GTFS_RT_URL`, `ARCGIS_311_SERVICE_URL`, and
