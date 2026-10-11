@@ -122,6 +122,10 @@ portable — most changes for a new city are config, not code. See
 
 ## Operations
 
+**New here?** Start with [docs/AGENT_INSTALL.md](docs/AGENT_INSTALL.md) —
+how to get this running on a server, including a copy-paste prompt you can
+hand to an AI agent to install it for you.
+
 See [docs/RUNBOOK.md](docs/RUNBOOK.md) for deployment, key rotation, adding
 datasets/tools, monitoring, backups, and scaling notes.
 
