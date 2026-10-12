@@ -26,6 +26,10 @@ a new package under `src/adapters/<city>/` plus one line in the registry.
 **Portable (reuse as-is):**
 - `SocrataClient` (`open_data.py`) — any city on a Socrata portal only needs
   a different `SOCRATA_DOMAIN`. Dozens of US cities run Socrata.
+- `CKANClient` (`src/adapters/ckan/client.py`) — any city on a CKAN portal
+  only needs a different `CKAN_API_BASE_URL`. Set `CITY_ADAPTER=ckan` and
+  you're live: no per-city code at all. Covers Liberia (data.gov.lr),
+  Sierra Leone (opendatasl.gov.sl), data.gov.au, open.canada.ca, and more.
 - `TransitAdapter` (`transit.py`) — GTFS-RT is a national standard. Any
   agency's Trip Updates feed URL works; only the config value changes.
 - Auth, caching, usage logging, Docker Compose — city-independent.

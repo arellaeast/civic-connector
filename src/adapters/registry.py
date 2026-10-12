@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from src.adapters.baltimore.adapter import BaltimoreAdapter
 from src.adapters.base import CityAdapter
+from src.adapters.ckan.adapter import CKANAdapter
 from src.cache import Cache
 from src.config import Settings
 
@@ -16,4 +17,6 @@ def get_adapter(name: str, settings: Settings, cache: Cache | None = None) -> Ci
     """
     if name == "baltimore":
         return BaltimoreAdapter(settings, cache=cache)
+    if name == "ckan":
+        return CKANAdapter(settings, cache=cache)
     raise ValueError(f"Unknown city adapter: {name!r}. See docs/ADDING_A_CITY.md to add one.")

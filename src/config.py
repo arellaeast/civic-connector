@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     socrata_domain: str | None = None
     socrata_app_token: str | None = None
 
+    # CKAN (generic adapter for CKAN-powered portals; see docs/ADDING_A_CITY.md)
+    # Full URL of the portal's Action API root, e.g.
+    # https://data.gov.lr/api/3/action  (Liberia)
+    # https://opendatasl.gov.sl/api/3/action  (Sierra Leone)
+    ckan_api_base_url: str | None = None
+
     # MTA transit (GTFS-RT)
     mta_gtfs_rt_url: str | None = None
 
